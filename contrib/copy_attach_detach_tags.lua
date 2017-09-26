@@ -1,6 +1,7 @@
 --[[
     This file is part of darktable,
-    copyright 2014-2016 by Christian Kanzian.
+    Copyright 2014-2016 by Christian Kanzian
+    Copyright 2016 by Holger Klemm
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -32,11 +33,22 @@ USAGE
    darktable internal tags starting with 'darktable|' will not be touched
  * <your shortcut3> removes all expect darktable internal tags from selected images
  * <your shortcut4> replaces all tags expect darktable internals
-
+ * A module reset will empty the clipboard
 ]]
 
 local dt = require "darktable"
-dt.configuration.check_version(...,{3,0,0},{4,0,0})
+local debug = require "darktable.debug"
+
+local gettext = dt.gettext
+dt.configuration.check_version(...,{3,0,0},{4,0,0},{5,0,0})
+
+-- Tell gettext where to find the .mo file translating messages for a particular domain
+gettext.bindtextdomain("copy_attach_detach_tags",dt.configuration.config_dir.."/lua/locale/")
+
+local function _(msgid)
+    return gettext.dgettext("copy_attach_detach_tags", msgid)
+end
+
 
 local image_tags = {}
 
@@ -62,7 +74,7 @@ local function mcopy_tags()
 
       --remove duplicate and 'darktable|' tags create final image_tags
       for _,k in ipairs(tag_list_tmp) do
-        
+
          if not string.match(tostring(k), 'darktable|') then
            if not hash[k] then
              image_tags[#image_tags+1] = k
@@ -71,37 +83,38 @@ local function mcopy_tags()
          end
       end
 
-      dt.print("Image tags copied ...")
+      dt.print(_('Image tags copied ...'))
 
-     --create UI tag list     
+     --create UI tag list
      local taglist = ""
- 
+
      for _,tag in ipairs(image_tags) do
        if taglist == "" then
           taglist = tostring(tag)
        else
           taglist = taglist.."\n"..tostring(tag)
-        end    
-       end 
+        end
+       end
 
-	taglist_label.label = taglist 
+	taglist_label.label = taglist
 
      return(image_tags)
   end
-   
+
 -- attach copied tags to all selected images
 local function attach_tags()
-  
+
   if next(image_tags) == nil then
-    dt.print("No tags to attached, please copy tags first.")
+    dt.print(_('No tags to attached, please copy tags first.'))
+    return true
   end
-  
+
   local sel_images = dt.gui.action_images
 
   for _,image in ipairs(sel_images) do
     local present_image_tags = {}
     present_image_tags = dt.tags.get_tags(image)
-    
+
     for _,ct in ipairs(image_tags) do
       -- check if image has tags and attach
       if next(present_image_tags) == nil then
@@ -116,7 +129,7 @@ local function attach_tags()
       end
     end
   end
- dt.print("Tags attached ...")
+ dt.print(_('Tags attached ...'))
 end
 
 local function detach_tags()
@@ -125,61 +138,78 @@ local function detach_tags()
    for _,image in ipairs(sel_images) do
       local present_image_tags = {}
       present_image_tags = dt.tags.get_tags(image)
-   
+
       for _,present_tag in ipairs(present_image_tags) do
         if not string.match(tostring(present_tag), 'darktable|')  then
           dt.tags.detach(present_tag,image)
         end
       end
    end
-  dt.print("Tags removed from image(s).")
+  dt.print(_('Tags removed from image(s).'))
 end
 
 local function replace_tags()
   detach_tags()
   attach_tags()
-  dt.print("Tags replaced")
+  dt.print(_('Tags replaced'))
 end
 
 -- create modul Tagging addons
 taglist_label.reset_callback = mcopy_tags
 
-dt.register_lib("tagging_addon","Tagging addon",true,false,{
-    [dt.gui.views.lighttable] = {"DT_UI_CONTAINER_PANEL_RIGHT_CENTER",500}
-    },
-    dt.new_widget("box")
-    {
-      orientation = "vertical",
-       dt.new_widget("button")
-       {
-         label = "multi copy tags",
-         clicked_callback = mcopy_tags
-       },
-       dt.new_widget("button")
-       {
-         label = "paste tags",
-         clicked_callback = attach_tags
-       },
-       dt.new_widget("button")
-       {
-         label = "replace tags",
-         clicked_callback = replace_tags
-       },
-       dt.new_widget("button")
-       {
-         label = "remove all tags",
-         clicked_callback = detach_tags
-       },
-       dt.new_widget("label")
-       {
-         label = "tag clipboard",
+-- create buttons and elements
+local taglabel = dt.new_widget("label") {
+         label = _('tag clipboard'),
          selectable = false,
          ellipsize = "middle",
-         halign = "start"
-       },
-       dt.new_widget("separator"){},
-       taglist_label
-     },
+         halign = "start"}
+
+local box1 = dt.new_widget("box"){
+                  orientation = "horizontal",
+                  dt.new_widget("button") {
+                  label = _('multi copy tags'),
+                  clicked_callback = mcopy_tags},
+                  dt.new_widget("button") {
+                  label = _('paste tags'),
+                  clicked_callback = attach_tags}
+
+                  }
+
+local box2 = dt.new_widget("box"){
+                  orientation = "horizontal",
+                  dt.new_widget("button") {
+                  label = _('replace tags'),
+                  clicked_callback = replace_tags},
+                  dt.new_widget("button") {
+                  label = _('remove all tags'),
+                  clicked_callback = detach_tags}
+                  }
+
+local sep = dt.new_widget("separator"){}
+
+-- pack elements into widget table for a nicer layout
+local widget_table = {}
+
+widget_table[1] = box1
+widget_table[#widget_table+1] = box2
+
+widget_table[#widget_table+1] = sep
+widget_table[#widget_table+1] = taglabel
+widget_table[#widget_table+1] = taglist_label
+
+
+-- create modul
+dt.register_lib("tagging_addon","Tagging addon",true,true,{
+    [dt.gui.views.lighttable] = {"DT_UI_CONTAINER_PANEL_RIGHT_CENTER",500}
+    },
+    dt.new_widget("box") {
+  --    orientation = "vertical",
+      reset_callback = function()
+                    taglist_label.label = ""
+                    image_tags = {}
+                    end,
+      table.unpack(widget_table),
+      },
    nil,
    nil
   )
@@ -188,22 +218,22 @@ dt.register_lib("tagging_addon","Tagging addon",true,false,{
 -- shortcut for copy
 dt.register_event("shortcut",
                    mcopy_tags,
-                   "copy tags from selected image(s)")
+                   _('copy tags from selected image(s)'))
 
 -- shortcut for attach
 dt.register_event("shortcut",
                    attach_tags,
-                   "paste tags to selected image(s)")
+                   _('paste tags to selected image(s)'))
 
 -- shortcut for detaching tags
 dt.register_event("shortcut",
                    detach_tags,
-                   "remove tags from selected image(s)")
+                   _('remove tags from selected image(s)'))
 
                    -- shortcut for replace tags
 dt.register_event("shortcut",
                    replace_tags,
-                   "replace tags from selected image(s)")
+                   _('replace tags from selected image(s)'))
 
 -- vim: shiftwidth=2 expandtab tabstop=2 cindent syntax=lua
 -- kate: tab-indents: off; indent-width 2; replace-tabs on; remove-trailing-space on;

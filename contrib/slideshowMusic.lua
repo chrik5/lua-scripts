@@ -23,29 +23,19 @@ You need rhythmbox-client installed to use this script
 USAGE
 * require this script from your main lua file
 ]]
-   
+
 local dt = require "darktable"
+local df = require "lib/dtutils.file"
+require "official/yield"
 local gettext = dt.gettext
-dt.configuration.check_version(...,{2,0,2},{3,0,0})
+
+dt.configuration.check_version(...,{2,0,2},{3,0,0},{4,0,0})
 
 -- Tell gettext where to find the .mo file translating messages for a particular domain
-gettext.bindtextdomain("slideshowMusic",dt.configuration.config_dir.."/lua/")
+gettext.bindtextdomain("slideshowMusic",dt.configuration.config_dir.."/lua/locale/")
 
 local function _(msgid)
     return gettext.dgettext("slideshowMusic", msgid)
-end
-
-local function checkIfBinExists(bin)
-  local handle = io.popen("which "..bin)
-  local result = handle:read()
-  local ret
-  handle:close()
-  if (not result) then
-    dt.print_error(bin.." not found")
-    ret = false
-  end
-  ret = true
-  return ret
 end
 
 local function playSlideshowMusic(_, old_view, new_view)
@@ -54,7 +44,8 @@ local function playSlideshowMusic(_, old_view, new_view)
   filename = dt.preferences.read("slideshowMusic","SlideshowMusic","string")
   playMusic = dt.preferences.read("slideshowMusic","PlaySlideshowMusic","bool")
 
-  if not checkIfBinExists("rhythmbox-client") then
+  if not df.check_if_bin_exists("rhythmbox-client") then
+    dt.print_error(_("rhythmbox-client not found"))
     return
   end
 
@@ -63,14 +54,14 @@ local function playSlideshowMusic(_, old_view, new_view)
 
     if (new_view.id == "slideshow") then
       playCommand = 'rhythmbox-client --play-uri="'..filename..'"'
-		
+
       --dt.print_error(playCommand)
-      dt.control.execute( playCommand) 
+      dt.control.execute( playCommand)
     else
       if (old_view and old_view.id == "slideshow") then
         stopCommand = "rhythmbox-client --pause"
         --dt.print_error(stopCommand)
-        dt.control.execute( stopCommand) 
+        dt.control.execute( stopCommand)
       end
     end
   end
@@ -78,7 +69,7 @@ end
 
 -- Preferences
 dt.preferences.register("slideshowMusic", "SlideshowMusic", "file", _("Slideshow background music file"), "", "")
-dt.preferences.register("slideshowMusic",  
+dt.preferences.register("slideshowMusic",
                         "PlaySlideshowMusic",
                         "bool",
                         _("Play slideshow background music"),

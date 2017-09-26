@@ -31,13 +31,16 @@ USAGE
 * require this script from your main Lua file
 
 ]]
-   
+
 local dt = require "darktable"
+local df = require "lib/dtutils.file"
+require "official/yield"
 local gettext = dt.gettext
-dt.configuration.check_version(...,{3,0,0})
-	
+
+dt.configuration.check_version(...,{3,0,0},{4,0,0},{5,0,0})
+
 -- Tell gettext where to find the .mo file translating messages for a particular domain
-gettext.bindtextdomain("geoJSON_export",dt.configuration.config_dir.."/lua/")
+gettext.bindtextdomain("geoJSON_export",dt.configuration.config_dir.."/lua/locale/")
 
 local function _(msgid)
     return gettext.dgettext("geoJSON_export", msgid)
@@ -50,7 +53,7 @@ local function spairs(_table, order) -- Code copied from http://stackoverflow.co
     for _key in pairs(_table) do keys[#keys + 1] = _key end
 
     -- if order function given, sort by it by passing the table and keys a, b,
-    -- otherwise just sort the keys 
+    -- otherwise just sort the keys
     if order then
         table.sort(keys, function(a,b) return order(_table, a, b) end)
     else
@@ -71,55 +74,45 @@ local function show_status(storage, image, format, filename, number, total, high
     dt.print(string.format(_("Export Image %i/%i"), number, total))
 end
 
-local function checkIfBinExists(bin)
-    local handle = io.popen("which "..bin)
-    local result = handle:read()
-    local ret
-    handle:close()
-    if (not result) then
-        dt.print_error(bin.." not found")
-        ret = false
-    end
-    ret = true
-    return ret
-end
-
 local function create_geoJSON_file(storage, image_table, extra_data)
-
-    if not checkIfBinExists("mkdir") then
+    if not df.check_if_bin_exists("mkdir") then
+        dt.print_error(_("mkdir not found"))
         return
     end
-    if not checkIfBinExists("convert") then
+    if not df.check_if_bin_exists("convert") then
+        dt.print_error(_("convert not found"))
         return
     end
-    if not checkIfBinExists("xdg-open") then
+    if not df.check_if_bin_exists("xdg-open") then
+        dt.print_error(_("xdg-open not found"))
         return
     end
-    if not checkIfBinExists("xdg-user-dir") then
+    if not df.check_if_bin_exists("xdg-user-dir") then
+        dt.print_error(_("xdg-user-dir not found"))
         return
     end
 
     dt.print_error("Will try to export geoJSON file now")
 
-    local xportDirectory = dt.preferences.read("geoJSON_export","ExportDirectory","string")
+    local exportDirectory = dt.preferences.read("geoJSON_export","ExportDirectory","string")
 
     -- Creates dir if not exsists
     local imageFoldername = "files/"
     local mkdirCommand = "mkdir -p "..exportDirectory.."/"..imageFoldername
-    dt.control.execute( mkdirCommand) 
+    dt.control.execute( mkdirCommand)
 
     -- Create the thumbnails
     for image,exported_image in pairs(image_table) do
-        if ((image.longitude and image.latitude) and 
+        if ((image.longitude and image.latitude) and
             (image.longitude ~= 0 and image.latitude ~= 90) -- Sometimes the north-pole but most likely just wrong data
            ) then
-            local path, filename, filetype = string.match(image, "(.-)([^\\/]-%.?([^%.\\/]*))$")
-	    filename = string.upper(string.gsub(filename,"%.", "_"))
-        
+            local path, filename, filetype = string.match(exported_image, "(.-)([^\\/]-%.?([^%.\\/]*))$")
+            filename = string.upper(string.gsub(filename,"%.%w*", ""))
+
             -- convert -size 92x92 filename.jpg -resize 92x92 +profile "*" thumbnail.jpg
-            --	In this example, '-size 120x120' gives a hint to the JPEG decoder that the image is going to be downscaled to 
-            --	120x120, allowing it to run faster by avoiding returning full-resolution images to  GraphicsMagick for the 
-            --	subsequent resizing operation. The '-resize 120x120' specifies the desired dimensions of the output image. It 
+            --	In this example, '-size 120x120' gives a hint to the JPEG decoder that the image is going to be downscaled to
+            --	120x120, allowing it to run faster by avoiding returning full-resolution images to  GraphicsMagick for the
+            --	subsequent resizing operation. The '-resize 120x120' specifies the desired dimensions of the output image. It
             --	will be scaled so its largest dimension is 120 pixels. The '+profile "*"' removes any ICM, EXIF, IPTC, or other
             --	profiles that might be present in the input and aren't needed in the thumbnail.
 
@@ -129,8 +122,8 @@ local function create_geoJSON_file(storage, image_table, extra_data)
             dt.control.execute( concertCommand)
         end
 
-        -- delete the original image to not get into the kmz file
-        os.remove(image)
+        -- delete the original image
+        os.remove(exported_image)
 
         local pattern = "[/]?([^/]+)$"
         filmName = string.match(image.film.path, pattern)
@@ -141,17 +134,30 @@ local function create_geoJSON_file(storage, image_table, extra_data)
 
     -- Create the geoJSON file
     local geoJSON_file = [[
-{ 
+{
     "type": "FeatureCollection",
     "features": [
 ]]
-  
-    for image,exported_image in pairs(image_table) do
-	filename = string.upper(string.gsub(image.filename,"%.", "_"))
 
-	if ((image.longitude and image.latitude) and 
+    for image,exported_image in pairs(image_table) do
+	--filename = string.upper(string.gsub(image.filename,"%.", "_"))
+        -- Extract filename, e.g DSC9784.ARW -> DSC9784
+        filename = string.upper(string.gsub(image.filename,"%.%w*", ""))
+        -- Extract extension from exported image (user can choose JPG or PNG), e.g DSC9784.JPG -> .JPG
+        extension = string.match(exported_image,"%.%w*$")
+
+	if ((image.longitude and image.latitude) and
             (image.longitude ~= 0 and image.latitude ~= 90) -- Sometimes the north-pole but most likely just wrong data
            ) then
+
+            local image_title, image_description
+            if (image.title and image.title ~= "") then
+                image_title = image.title
+            else
+                image_title = image.filename
+            end
+            image_description = image.description
+
             geoJSON_file = geoJSON_file..
 [[    {
       "type": "Feature",
@@ -162,8 +168,8 @@ local function create_geoJSON_file(storage, image_table, extra_data)
             geoJSON_file = geoJSON_file..
 [[    },
       "properties": {
-        "title": "]]..image.title..[[",
-        "description": "]]..image.description..[[",
+        "title": "]]..image_title..[[",
+        "description": "]]..image_description..[[",
         "image": "]]..imageFoldername..filename..[[.jpg",
         "icon": {
           "iconUrl": "]]..imageFoldername.."thumb_"..filename..[[.jpg",
@@ -177,7 +183,7 @@ local function create_geoJSON_file(storage, image_table, extra_data)
     ,]]
         end
     end
-    
+
     geoJSON_file = geoJSON_file:sub(0,geoJSON_file:len()-1)
     geoJSON_file = geoJSON_file..
 [[
@@ -194,7 +200,7 @@ local function create_geoJSON_file(storage, image_table, extra_data)
 <html>
 <head>
   <meta charset=utf-8 />
-  <title>2014-05-31 Rieselfelder</title>
+  <title>]]..filmName..[[</title>
   <script src='https://api.tiles.mapbox.com/mapbox.js/v2.2.4/mapbox.js'></script>
   <link href='https://api.tiles.mapbox.com/mapbox.js/v2.2.4/mapbox.css' rel='stylesheet' />
   <style>
@@ -211,7 +217,7 @@ local function create_geoJSON_file(storage, image_table, extra_data)
     .setView([0,0], 5);
 
   var myLayer = L.mapbox.featureLayer()
-      .loadURL(']]..exportgeoJSONFilename..[[')      
+      .loadURL(']]..exportgeoJSONFilename..[[')
       .addTo(mapTooltipsJS);
 
   // Set a custom icon on each marker based on feature properties.
@@ -258,7 +264,7 @@ local function create_geoJSON_file(storage, image_table, extra_data)
     var polyline = L.polyline(line, polyline_options).addTo(mapTooltipsJS);
   });
 
-  
+
 </script>
 </body>
 </html>
@@ -275,11 +281,11 @@ local function create_geoJSON_file(storage, image_table, extra_data)
 
     dt.print("geoJSON file created in "..exportDirectory)
 
--- Open the file with the standard programm    
+-- Open the file with the standard programm
     if ( dt.preferences.read("geoJSON_export","OpengeoJSONFile","bool") == true ) then
         local geoJSONFileOpenCommand
         geoJSONFileOpenCommand = "xdg-open "..exportDirectory.."/\""..exportgeoJSONFilename.."\""
-        dt.control.execute( geoJSONFileOpenCommand) 
+        dt.control.execute( geoJSONFileOpenCommand)
     end
 
 
@@ -308,6 +314,9 @@ dt.preferences.register("geoJSON_export",
 local handle = io.popen("xdg-user-dir DESKTOP")
 local result = handle:read()
 handle:close()
+if (result == nil) then
+	result = ""
+end
 dt.preferences.register("geoJSON_export",
 	"ExportDirectory",
 	"directory",
