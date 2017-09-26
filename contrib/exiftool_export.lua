@@ -45,7 +45,7 @@ USAGE
 ]]
 
 local dt = require "darktable"
-dt.configuration.check_version(...,{3,0,0})
+dt.configuration.check_version(...,{3,0,0},{4,0,0},{5,0,0})
 
 
 -- function copied from hugin.lua
@@ -123,6 +123,11 @@ dt.register_lib("exiftool_ui","exiftool on export",true,false,{
 local function exiftool_call(img)
    local exif_cmd 
 
+
+   local imgexp = tostring(img)
+   print(imgexp)
+
+
    if (cmd_options.value == "-@") then
      --check if argumentsfile 
      dt.print_error(tostring(arg_file.value))
@@ -132,11 +137,11 @@ local function exiftool_call(img)
        return
       end
     
-      exif_cmd = "exiftool "..tostring(cmd_options.value).." '"..arg_file.value.."'".." -overwrite_original ".."'" .. img .. "'"
+      exif_cmd = "exiftool "..tostring(cmd_options.value).." '"..arg_file.value.."'".." -overwrite_original ".."'" .. imgexp .. "'"
 
     else
  
-      exif_cmd = "exiftool ".."'"..tostring(cmd_options.value).."'".." -overwrite_original ".."'" .. img .. "'"
+      exif_cmd = "exiftool ".."'"..tostring(cmd_options.value).."'".." -overwrite_original ".."'" .. imgexp .. "'"
 
     end   
       
@@ -145,16 +150,16 @@ end
 
 
 -- final call exiftool if enabled on export events 
-dt.register_event("intermediate-export-image", function(event,img)
+dt.register_event("intermediate-export-image", function(event,img,filename)
     
     if not exiftool_enable.value == true then
        return
     end
    
-    local cmd = exiftool_call(img)  
+    local cmd = exiftool_call(filename)  
     dt.print("Call "..cmd) 
 
-    coroutine.yield("RUN_COMMAND", cmd)
+    dt.control.execute(cmd)
       
 end
 )
